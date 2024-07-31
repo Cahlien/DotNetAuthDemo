@@ -1,19 +1,50 @@
 using DotNetAuthDemo.Data;
+using DotNetAuthDemo.models;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.OpenApi.Models;
+using Swashbuckle.AspNetCore.Filters;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// get default connection string
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
-Console.WriteLine($"Connection String: {connectionString}");
 
-builder.Services.AddDbContext<DataContext>(options =>
-    options.UseSqlServer(connectionString));
 
 // Add services to the container.
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(options =>
+{
+    options.AddSecurityDefinition("oauth2", new OpenApiSecurityScheme
+    {
+        In = ParameterLocation.Header,
+        Name = "Authorization",
+        Type = SecuritySchemeType.ApiKey
+    });
+    
+    options.OperationFilter<SecurityRequirementsOperationFilter>();
+});
+
+
+// Step 1: Create and register Db contextMicrosoft.AspNetCore.Identity.EntityFrameworkCore
+builder.Services.AddDbContext<DataContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+// Step 2: Add authorization
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("WEATHER_READ", policy =>
+        policy.RequireClaim("WEATHER_READ"));
+    
+    options.AddPolicy("READ_ONLY", policy =>
+        policy.RequireRole("READ_ONLY"));
+});
+
+// Step 3: Add Identity endpoints and entity framework stores
+builder.Services.AddIdentityApiEndpoints<DemoUser>()
+    .AddRoles<IdentityRole>()
+    .AddEntityFrameworkStores<DataContext>();
+
+builder.Services.AddControllers();
 
 var app = builder.Build();
 
@@ -24,7 +55,15 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+// Step 4: Map user to identity API
+app.MapIdentityApi<DemoUser>();
+
 app.UseHttpsRedirection();
+
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.MapControllers();
 
 var summaries = new[]
 {
@@ -44,6 +83,7 @@ app.MapGet("/weatherforecast", () =>
         return forecast;
     })
     .WithName("GetWeatherForecast")
+    .RequireAuthorization(policyNames: "WEATHER_READ")
     .WithOpenApi();
 
 app.Run();
